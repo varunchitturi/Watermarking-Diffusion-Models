@@ -30,6 +30,8 @@ from ldm.models.autoencoder import AutoencoderKL
 from ldm.models.diffusion.ddpm import LatentDiffusion
 from loss.loss_provider import LossProvider
 
+import wandb
+
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 
@@ -57,11 +59,19 @@ def get_parser():
     aa("--img_size", type=int, default=256, help="Resize images to this size")
     aa("--loss_i", type=str, default="watson-vgg", help="Type of loss for the image loss. Can be watson-vgg, mse, watson-dft, etc.")
     aa("--loss_w", type=str, default="bce", help="Type of loss for the watermark loss. Can be mse or bce")
-    aa("--lambda_i", type=float, default=0.2, help="Weight of the image loss in the total loss")
+    
     aa("--lambda_w", type=float, default=1.0, help="Weight of the watermark loss in the total loss")
     aa("--optimizer", type=str, default="AdamW,lr=5e-4", help="Optimizer and learning rate for training")
     aa("--steps", type=int, default=100, help="Number of steps to train the model for")
     aa("--warmup_steps", type=int, default=20, help="Number of warmup steps for the optimizer")
+    
+    aa("--loss_formation", type=str, required=True, default="regular", choices=["regular", "constrained"], help="Whether to use constrained learning or a single objective with a regularization term.")
+    # regular loss formation
+    aa("--lambda_i", type=float, default=0.2, help="Weight of the image loss in the total loss")
+    # constrained loss formation
+    aa("--image_loss_constraint",type=float,help="The threshold for the image loss constraint")
+    aa("--dual_lr",type=float,help="The dual learning rate when using constrained learning.")
+    aa("--primal_per_dual",type=int,help="The number of primal learning steps per dual learning step")
 
     group = parser.add_argument_group('Logging and saving freq. parameters')
     aa("--log_freq", type=int, default=10, help="Logging frequency (in steps)")
@@ -77,11 +87,22 @@ def get_parser():
 
 
 def main(params):
+    
+    wandb.init(
+        project="Constrained Stable Signature",
+        config=params
+    )
 
     # Set seeds for reproductibility 
     torch.manual_seed(params.seed)
     torch.cuda.manual_seed_all(params.seed)
     np.random.seed(params.seed)
+    
+    # check if arguments are valid
+    if params.loss_formation == "regular" and (params.lambda_i is None):
+        raise Exception("params.lambda_i is None")
+    elif params.loss_formation == "constrained" and (params.image_loss_constraint is None or params.dual_lr is None or params.primal_per_dual is None):
+        raise Exception("One or more of params.image_loss_constraint, params.dual_lr, or params.primal_per_dual is None")
     
     # Print the arguments
     print("__git__:{}".format(utils.get_sha()))
@@ -248,19 +269,19 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
     ldm_decoder.decoder.train()
     base_lr = optimizer.param_groups[0]["lr"]
     
-    # dual variable mu for image loss
-    mu = 1
-    # dual variable update step.
-    eta = 0.01
-    # num primal steps per dual steps
-    primal_steps = 5
-    
+    if params.loss_formation == "regular":
+        primal_steps = 1
+        image_loss_weight = params.lambda_i
+    else:
+        primal_steps = params.primal_per_dual
+        image_loss_weight = 0
+
     for ii, imgs in enumerate(metric_logger.log_every(data_loader, params.log_freq, header)):
         
         utils.adjust_learning_rate(optimizer, ii, params.steps, params.warmup_steps, base_lr)
         
         
-        for primal_step in range(primal_steps):
+        for _ in range(primal_steps):
             
             imgs = imgs.to(device)
             keys = key.repeat(imgs.shape[0], 1)
@@ -281,15 +302,16 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
             lossw = loss_w(decoded, keys)
             lossi = loss_i(imgs_w, imgs_d0)
             
-            #loss = params.lambda_w * lossw + params.lambda_i * lossi
-            loss = params.lambda_w * lossw + mu * lossi
+            loss = params.lambda_w * lossw + image_loss_weight * lossi
 
             # optim step
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             
-        mu += eta * lossi.detach()
+        if params.loss_formation == "constrained":
+            image_loss_weight = max(0, image_loss_weight + 
+                                    params.dual_lr * (lossi - params.image_loss_constraint))
 
         # log stats
         diff = (~torch.logical_xor(decoded>0, keys>0)) # b k -> b k
@@ -298,14 +320,16 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
         log_stats = {
             "iteration": ii,
             "loss": loss.item(),
-            "loss_w": lossw.item(),
-            "loss_i": lossi.item(),
+            "signature_loss": lossw.item(),
+            "image_loss": lossi.item(),
+            "image_loss_weight": image_loss_weight,
             "psnr": utils_img.psnr(imgs_w, imgs_d0).mean().item(),
             # "psnr_ori": utils_img.psnr(imgs_w, imgs).mean().item(),
-            "bit_acc_avg": torch.mean(bit_accs).item(),
+            "signature_acc_avg": torch.mean(bit_accs).item(),
             "word_acc_avg": torch.mean(word_accs.type(torch.float)).item(),
             "lr": optimizer.param_groups[0]["lr"],
         }
+        wandb.log(log_stats)
         for name, loss in log_stats.items():
             metric_logger.update(**{name:loss})
         if ii % params.log_freq == 0:

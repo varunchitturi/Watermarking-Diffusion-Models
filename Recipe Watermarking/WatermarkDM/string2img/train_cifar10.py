@@ -1,5 +1,7 @@
 import argparse
 import wandb
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--data_dir", type=str, required=True, help="Directory with image dataset."
@@ -79,21 +81,18 @@ parser.add_argument(
 parser.add_argument(
     "--image_loss_constraint",
     type=float,
-    required=True,
     help="The threshold for the image loss constraint"
 )
 
 parser.add_argument(
     "--dual_lr",
     type=float,
-    required=True,
     help="The dual learning rate when using constrained learning."
 )
 
 parser.add_argument(
     "--primal_per_dual",
     type=int,
-    required=True,
     help="The number of primal learning steps per dual learning step"
 )
 
@@ -216,6 +215,11 @@ def main():
     now = datetime.now()
     dt_string = now.strftime("%d%m%Y_%H:%M:%S")
     EXP_NAME = f"stegastamp_{args.bit_length}_{dt_string}"
+    
+    wandb.init(
+        project="Constrained Recipe Watermarking",
+        config=args
+    )
 
     device = torch.device("cuda")
 
@@ -325,9 +329,17 @@ def main():
             else:
                 steps_since_image_loss_activated += 1
 
-            # Logging
+            wandb.log({
+                "loss": loss.item(),
+                "signature_loss": BCE_loss.item(),
+                "signature_acc_avg": bitwise_accuracy.item(),
+                "image_loss": image_loss.item(),
+                "image_loss_weight": image_loss_weight,
+                "steps_since_image_loss_activated": steps_since_image_loss_activated,
+                "lr": decoder_encoder_optim.param_groups[0]["lr"]
+            })
+                
             if global_step in plot_points:
-                # TODO: update for wandb
                 save_image(
                     fingerprinted_images,
                     SAVED_IMAGES + "/{}.png".format(global_step),
@@ -356,14 +368,3 @@ def main():
 if __name__ == "__main__":
     main()
     
-#log the following to wandb each time you train the model
-
-#the watermark loss i.e. the objective loss
-#bit accuracy
-#the constraint loss i.e. the image loss
-#constraint loss - b
-#the dual variable as it evolves during training
-#the learning rate
-
-#train each for a few different values of the constraint threshold (b)
-
