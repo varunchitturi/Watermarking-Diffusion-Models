@@ -18,18 +18,16 @@ parser.add_argument(
     "--bit_length",
     type=int,
     default=48,
-    required=True,
     help="Number of bits in the fingerprint.",
 )
 parser.add_argument(
     "--image_resolution",
     type=int,
     default=32,
-    required=True,
     help="Height and width of square images.",
 )
 parser.add_argument(
-    "--num_epochs", type=int, default=20, help="Number of training epochs."
+    "--num_epochs", type=int, default=10, help="Number of training epochs."
 )
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size.")
 parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
@@ -39,7 +37,6 @@ parser.add_argument("--cuda", type=str, default=0)
 parser.add_argument(
     "--image_loss",
     type=str,
-    required=True,
     default="l2",
     choices=["l2, watson-vgg"],
     help="The criterion to use for the image loss"
@@ -49,7 +46,6 @@ parser.add_argument(
     "--loss_formation",
     type=str,
     required=True,
-    default="regular",
     choices=["regular", "constrained"],
     help="Whether to use constrained learning or a single objective with a regularization term. "
 )
@@ -92,6 +88,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--primal_per_dual",
+    default=5,
     type=int,
     help="The number of primal learning steps per dual learning step"
 )
@@ -216,6 +213,9 @@ def main():
     dt_string = now.strftime("%d%m%Y_%H:%M:%S")
     EXP_NAME = f"stegastamp_{args.bit_length}_{dt_string}"
     
+    print("Training watermarking network - stegastamp with params:")
+    print(args)
+    
     wandb.init(
         project="Constrained Recipe Watermarking",
         config=args
@@ -287,7 +287,7 @@ def main():
                 image_loss_weight = max(0, 
                                         image_loss_weight
                                         + args.dual_lr
-                                        * (image_loss - args.image_loss_constraint)
+                                        * (image_loss.detach().item() - args.image_loss_constraint)
                                         )
                 
             

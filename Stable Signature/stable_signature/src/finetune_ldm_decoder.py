@@ -57,7 +57,7 @@ def get_parser():
     group = parser.add_argument_group('Training parameters')
     aa("--batch_size", type=int, default=2, help="Batch size for training")
     aa("--img_size", type=int, default=256, help="Resize images to this size")
-    aa("--loss_i", type=str, default="watson-vgg", help="Type of loss for the image loss. Can be watson-vgg, mse, watson-dft, etc.")
+    aa("--loss_i", type=str, default="l2", help="Type of loss for the image loss. Can be watson-vgg, l2, watson-dft, etc.")
     aa("--loss_w", type=str, default="bce", help="Type of loss for the watermark loss. Can be mse or bce")
     
     aa("--lambda_w", type=float, default=1.0, help="Weight of the watermark loss in the total loss")
@@ -65,13 +65,13 @@ def get_parser():
     aa("--steps", type=int, default=100, help="Number of steps to train the model for")
     aa("--warmup_steps", type=int, default=20, help="Number of warmup steps for the optimizer")
     
-    aa("--loss_formation", type=str, required=True, default="regular", choices=["regular", "constrained"], help="Whether to use constrained learning or a single objective with a regularization term.")
+    aa("--loss_formation", type=str, required=True, choices=["regular", "constrained"], help="Whether to use constrained learning or a single objective with a regularization term.")
     # regular loss formation
-    aa("--lambda_i", type=float, default=0.2, help="Weight of the image loss in the total loss")
+    aa("--image_loss_weight", type=float, help="Weight of the image loss in the total loss")
     # constrained loss formation
-    aa("--image_loss_constraint",type=float,help="The threshold for the image loss constraint")
-    aa("--dual_lr",type=float,help="The dual learning rate when using constrained learning.")
-    aa("--primal_per_dual",type=int,help="The number of primal learning steps per dual learning step")
+    aa("--image_loss_constraint", type=float, help="The threshold for the image loss constraint")
+    aa("--dual_lr", type=float, help="The dual learning rate when using constrained learning.")
+    aa("--primal_per_dual", type=int, default=5, help="The number of primal learning steps per dual learning step")
 
     group = parser.add_argument_group('Logging and saving freq. parameters')
     aa("--log_freq", type=int, default=10, help="Logging frequency (in steps)")
@@ -99,8 +99,8 @@ def main(params):
     np.random.seed(params.seed)
     
     # check if arguments are valid
-    if params.loss_formation == "regular" and (params.lambda_i is None):
-        raise Exception("params.lambda_i is None")
+    if params.loss_formation == "regular" and (params.image_loss_weight is None):
+        raise Exception("params.image_loss_weight is None")
     elif params.loss_formation == "constrained" and (params.image_loss_constraint is None or params.dual_lr is None or params.primal_per_dual is None):
         raise Exception("One or more of params.image_loss_constraint, params.dual_lr, or params.primal_per_dual is None")
     
@@ -202,7 +202,7 @@ def main(params):
     else:
         raise NotImplementedError
     
-    if params.loss_i == 'mse':
+    if params.loss_i == 'l2':
         loss_i = lambda imgs_w, imgs: torch.mean((imgs_w - imgs)**2)
     elif params.loss_i == 'watson-dft':
         provider = LossProvider()
@@ -271,7 +271,7 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
     
     if params.loss_formation == "regular":
         primal_steps = 1
-        image_loss_weight = params.lambda_i
+        image_loss_weight = params.image_loss_weight
     else:
         primal_steps = params.primal_per_dual
         image_loss_weight = 0
@@ -311,14 +311,13 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
             
         if params.loss_formation == "constrained":
             image_loss_weight = max(0, image_loss_weight + 
-                                    params.dual_lr * (lossi - params.image_loss_constraint))
+                                    params.dual_lr * (lossi.detach().item() - params.image_loss_constraint))
 
         # log stats
         diff = (~torch.logical_xor(decoded>0, keys>0)) # b k -> b k
         bit_accs = torch.sum(diff, dim=-1) / diff.shape[-1] # b k -> b
         word_accs = (bit_accs == 1) # b
         log_stats = {
-            "iteration": ii,
             "loss": loss.item(),
             "signature_loss": lossw.item(),
             "image_loss": lossi.item(),
