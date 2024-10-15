@@ -1,0 +1,6 @@
+stable_signature/output/**
+stable_signature/data
+.DS_Store
+**/__pycache__/
+sd_checkpoint.ckpt
+stable_signature/src/loss/losses
