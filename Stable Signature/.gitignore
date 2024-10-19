@@ -4,3 +4,4 @@ stable_signature/data
 **/__pycache__/
 sd_checkpoint.ckpt
 stable_signature/src/loss/losses
+stable_signature/src/output

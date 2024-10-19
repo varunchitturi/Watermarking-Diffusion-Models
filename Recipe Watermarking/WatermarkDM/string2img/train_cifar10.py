@@ -336,7 +336,9 @@ def main():
                 "image_loss": image_loss.item(),
                 "image_loss_weight": image_loss_weight,
                 "steps_since_image_loss_activated": steps_since_image_loss_activated,
-                "lr": decoder_encoder_optim.param_groups[0]["lr"]
+                "lr": decoder_encoder_optim.param_groups[0]["lr"],
+                "original_images":  wandb.Image(clean_images, caption=f"Original Images"),
+                "fingerprinted_images": wandb.Image(fingerprinted_images, caption=f"Fingerprinted Images")
             })
                 
             if global_step in plot_points:

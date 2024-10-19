@@ -57,7 +57,7 @@ def get_parser():
     group = parser.add_argument_group('Training parameters')
     aa("--batch_size", type=int, default=2, help="Batch size for training")
     aa("--img_size", type=int, default=256, help="Resize images to this size")
-    aa("--loss_i", type=str, default="l2", help="Type of loss for the image loss. Can be watson-vgg, l2, watson-dft, etc.")
+    aa("--loss_i", type=str, default="watson-vgg", help="Type of loss for the image loss. Can be watson-vgg, l2, watson-dft, etc.")
     aa("--loss_w", type=str, default="bce", help="Type of loss for the watermark loss. Can be mse or bce")
     
     aa("--lambda_w", type=float, default=1.0, help="Weight of the watermark loss in the total loss")
@@ -326,11 +326,17 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
             # "psnr_ori": utils_img.psnr(imgs_w, imgs).mean().item(),
             "signature_acc_avg": torch.mean(bit_accs).item(),
             "word_acc_avg": torch.mean(word_accs.type(torch.float)).item(),
-            "lr": optimizer.param_groups[0]["lr"],
+            "lr": optimizer.param_groups[0]["lr"]
         }
-        wandb.log(log_stats)
+        
+        wandb_stats = log_stats.copy()
+        wandb_stats["original_images"] = wandb.Image(imgs, caption=f"Original Images")
+        wandb_stats["decoded_original_images"] = wandb.Image(imgs_d0, caption=f"Decoded Images by Original Model")
+        wandb_stats["decoded_watermarked_images"] = wandb.Image(imgs_w, caption=f"Decoded Images by Finetuned Model (Watermarked)")
+        wandb.log(wandb_stats)
         for name, loss in log_stats.items():
-            metric_logger.update(**{name:loss})
+            if "images" not in name:
+                metric_logger.update(**{name:loss})
         if ii % params.log_freq == 0:
             print(json.dumps(log_stats))
         
