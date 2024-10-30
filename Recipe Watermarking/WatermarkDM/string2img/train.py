@@ -1,5 +1,6 @@
 import argparse
 import wandb
+from loss.loss_provider import LossProvider
 
 
 parser = argparse.ArgumentParser()
@@ -38,7 +39,7 @@ parser.add_argument(
     "--image_loss",
     type=str,
     default="l2",
-    choices=["l2, watson-vgg"],
+    choices=["l2", "watson-vgg"],
     help="The criterion to use for the image loss"
 )
 
@@ -151,21 +152,28 @@ plot_points = (
 class CustomImageFolder(Dataset):
     def __init__(self, data_dir, transform=None):
         self.data_dir = data_dir
-        for i in range(50):
-            if i == 0:
-                self.filenames = glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.png"))
-                self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpeg")))
-                self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpg")))
-            else:
-                self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.png")))
-                self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpeg")))
-                self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpg")))
+        if glob.glob(os.path.join(data_dir, "*.png")):
+            self.filenames = glob.glob(os.path.join(data_dir, "*.png"))
+        elif glob.glob(os.path.join(data_dir, "*.jpeg")):
+            self.filenames = glob.glob(os.path.join(data_dir, "*.jpeg"))
+        elif glob.glob(os.path.join(data_dir, "*.jpg")):
+            self.filenames = glob.glob(os.path.join(data_dir, "*.jpg"))
+        else:
+            for i in range(50):
+                if i == 0:
+                    self.filenames = glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.png"))
+                    self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpeg")))
+                    self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpg")))
+                else:
+                    self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.png")))
+                    self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpeg")))
+                    self.filenames.extend(glob.glob(os.path.join(data_dir, f"{str(i).zfill(5)}", "*.jpg")))
         self.filenames = sorted(self.filenames)
         self.transform = transform
 
     def __getitem__(self, idx):
         filename = self.filenames[idx]
-        image = PIL.Image.open(filename)
+        image = PIL.Image.open(filename).convert("RGB")
         if self.transform:
             image = self.transform(image)
         return image, 0
@@ -261,8 +269,7 @@ def main():
     for i_epoch in range(args.num_epochs):
         print(f"Epoch: {i_epoch}/{args.num_epochs}")
         dataloader = DataLoader(
-            dataset, batch_size=args.batch_size, shuffle=True, num_workers=16
-        )
+            dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
         for images, _ in tqdm(dataloader):
             
             global_step += 1
@@ -303,8 +310,11 @@ def main():
                 if args.image_loss == "l2":
                     criterion = nn.MSELoss()
                 elif args.image_loss == "watson-vgg":
-                    raise Exception("Not implemented.")
-                
+                    provider = LossProvider()
+                    loss_percep = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
+                    loss_percep = loss_percep.to(device)
+                    criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+imgs)/2.0, (1+fingerprinted_imgs)/2.0)/ imgs.shape[0]
+                    
                 image_loss = criterion(fingerprinted_images, clean_images)
 
                 criterion = nn.BCEWithLogitsLoss()

@@ -3,6 +3,7 @@ WatermarkDM/edm/datasets/**
 WatermarkDM/edm/training-runs/**
 WatermarkDM/edm/downloads/**
 WatermarkDM/string2img/_output/**
+WatermarkDM/string2img/loss/losses
 .vscode
 .DS_Store
 **/__pycache__/

@@ -107,7 +107,7 @@ cd ../../../../string2img
 Then, we can start training.
 
 ```
-python train_cifar10.py \
+python train.py \
 --data_dir ../edm/datasets/uncompressed/cifar10 \
 --image_resolution 32 \
 --output_dir ./_output/cifar10 \
