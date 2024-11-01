@@ -61,7 +61,7 @@ def get_parser():
     aa("--loss_w", type=str, default="bce", help="Type of loss for the watermark loss. Can be mse or bce")
     
     aa("--lambda_w", type=float, default=1.0, help="Weight of the watermark loss in the total loss")
-    aa("--optimizer", type=str, default="AdamW,lr=5e-4", help="Optimizer and learning rate for training")
+    aa("--optimizer", type=str, default="AdamW,lr=1e-5", help="Optimizer and learning rate for training")
     aa("--steps", type=int, default=100, help="Number of steps to train the model for")
     aa("--warmup_steps", type=int, default=20, help="Number of warmup steps for the optimizer")
     

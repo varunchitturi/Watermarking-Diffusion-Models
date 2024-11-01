@@ -207,6 +207,7 @@ def load_data():
                 transforms.Resize(IMAGE_RESOLUTION),
                 transforms.CenterCrop(IMAGE_RESOLUTION),
                 transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ]
         )
 
@@ -265,7 +266,14 @@ def main():
     else:
         primal_steps = args.primal_per_dual
     
-
+    if args.image_loss == "l2":
+        image_criterion = nn.MSELoss()
+    elif args.image_loss == "watson-vgg":
+        provider = LossProvider()
+        loss_percep = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
+        loss_percep = loss_percep.to(device)
+        image_criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+imgs)/2.0, (1+fingerprinted_imgs)/2.0)/ imgs.shape[0]
+    signature_criterion = nn.BCEWithLogitsLoss()
     for i_epoch in range(args.num_epochs):
         print(f"Epoch: {i_epoch}/{args.num_epochs}")
         dataloader = DataLoader(
@@ -301,26 +309,19 @@ def main():
             clean_images = images.to(device)
             fingerprints = fingerprints.to(device)
 
-            for _ in range(primal_steps):
+            for _ in range(1 if steps_since_image_loss_activated == -1 else primal_steps):
             
                 fingerprinted_images = encoder(fingerprints, clean_images)
 
                 decoder_output = decoder(fingerprinted_images)
                 
-                if args.image_loss == "l2":
-                    criterion = nn.MSELoss()
-                elif args.image_loss == "watson-vgg":
-                    provider = LossProvider()
-                    loss_percep = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
-                    loss_percep = loss_percep.to(device)
-                    criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+imgs)/2.0, (1+fingerprinted_imgs)/2.0)/ imgs.shape[0]
                     
-                image_loss = criterion(fingerprinted_images, clean_images)
+                image_loss = image_criterion(fingerprinted_images, clean_images)
 
-                criterion = nn.BCEWithLogitsLoss()
-                BCE_loss = criterion(decoder_output.view(-1), fingerprints.view(-1))
                 
-                loss = BCE_loss + image_loss_weight * image_loss
+                signature_loss = signature_criterion(decoder_output.view(-1), fingerprints.view(-1))
+                
+                loss = signature_loss + image_loss_weight * image_loss
 
                 encoder.zero_grad()
                 decoder.zero_grad()
@@ -341,7 +342,7 @@ def main():
 
             wandb.log({
                 "loss": loss.item(),
-                "signature_loss": BCE_loss.item(),
+                "signature_loss": signature_loss.item(),
                 "signature_acc_avg": bitwise_accuracy.item(),
                 "image_loss": image_loss.item(),
                 "image_loss_weight": image_loss_weight,
