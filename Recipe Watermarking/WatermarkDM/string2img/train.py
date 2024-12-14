@@ -1,6 +1,7 @@
 import argparse
 import wandb
 from loss.loss_provider import LossProvider
+import collections
 
 
 parser = argparse.ArgumentParser()
@@ -29,6 +30,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--num_epochs", type=int, default=10, help="Number of training epochs."
+)
+parser.add_argument(
+    "--use_pretrained", default="", choices=["wm", "image", "wm_image"], help="Select a pretrained watermarking model to begin training with."
 )
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size.")
 parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
@@ -206,8 +210,7 @@ def load_data():
             [
                 transforms.Resize(IMAGE_RESOLUTION),
                 transforms.CenterCrop(IMAGE_RESOLUTION),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+                transforms.ToTensor()
             ]
         )
 
@@ -244,6 +247,21 @@ def main():
         IMAGE_CHANNELS,
         args.bit_length,
     )
+    global_step = 0
+    steps_since_image_loss_activated = -1
+    if args.use_pretrained != "":
+        steps_since_image_loss_activated = 0
+        encoder_load = torch.load(f"pretrained_{args.use_pretrained}_stegastamp_encoder.pth")
+        decoder_load = torch.load(f"pretrained_{args.use_pretrained}_stegastamp_decoder.pth")
+        if type(encoder_load) is collections.OrderedDict:
+            encoder.load_state_dict(encoder_load)
+        else:
+            encoder = encoder_load
+        if type(decoder_load) is collections.OrderedDict:
+            decoder.load_state_dict(decoder_load)
+        else:
+            decoder = decoder_load
+            
     encoder = encoder.to(device)
     decoder = decoder.to(device)
 
@@ -256,9 +274,6 @@ def main():
     elif args.loss_formation == "constrained" and (args.image_loss_constraint is None or args.dual_lr is None or args.primal_per_dual is None):
         raise Exception("One or more of args.image_loss_constraint, args.dual_lr, or args.primal_per_dual is None")
     
-
-    global_step = 0
-    steps_since_image_loss_activated = -1
 
     image_loss_weight = 0
     if args.loss_formation == "regular":
@@ -274,6 +289,11 @@ def main():
         loss_percep = loss_percep.to(device)
         image_criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+imgs)/2.0, (1+fingerprinted_imgs)/2.0)/ imgs.shape[0]
     signature_criterion = nn.BCEWithLogitsLoss()
+    
+    image_loss = torch.tensor(0)
+    signature_loss = torch.tensor(0)
+    loss = torch.tensor(0)
+    
     for i_epoch in range(args.num_epochs):
         print(f"Epoch: {i_epoch}/{args.num_epochs}")
         dataloader = DataLoader(
@@ -347,9 +367,7 @@ def main():
                 "image_loss": image_loss.item(),
                 "image_loss_weight": image_loss_weight,
                 "steps_since_image_loss_activated": steps_since_image_loss_activated,
-                "lr": decoder_encoder_optim.param_groups[0]["lr"],
-                "original_images":  wandb.Image(clean_images, caption=f"Original Images"),
-                "fingerprinted_images": wandb.Image(fingerprinted_images, caption=f"Fingerprinted Images")
+                "lr": decoder_encoder_optim.param_groups[0]["lr"]
             })
                 
             if global_step in plot_points:
@@ -358,6 +376,10 @@ def main():
                     SAVED_IMAGES + "/{}.png".format(global_step),
                     normalize=True,
                 )
+                wandb.log({
+                    "original_images":  wandb.Image(clean_images, caption=f"Original Images"),
+                    "fingerprinted_images": wandb.Image(fingerprinted_images, caption=f"Fingerprinted Images")
+                })
             # checkpointing
             if global_step % 5000 == 0:
                 torch.save(

@@ -20,6 +20,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.utils import save_image
+import collections
+import stegastamp_models
 
 import utils
 import utils_img
@@ -49,6 +51,7 @@ def get_parser():
     aa("--ldm_config", type=str, default="sd/stable-diffusion-v-1-4-original/v1-inference.yaml", help="Path to the configuration file for the LDM model") 
     aa("--ldm_ckpt", type=str, default="sd/stable-diffusion-v-1-4-original/sd-v1-4-full-ema.ckpt", help="Path to the checkpoint file for the LDM model") 
     aa("--msg_decoder_path", type=str, default= "models/hidden/dec_48b_whit.torchscript.pt", help="Path to the hidden decoder for the watermarking model")
+    aa("--decoder_model_type", type=str, choices=["hidden", "stegastamp"], default="hidden", help="Type of watermarking model")
     aa("--num_bits", type=int, default=48, help="Number of bits in the watermark")
     aa("--redundancy", type=int, default=1, help="Number of times the watermark is repeated to increase robustness")
     aa("--decoder_depth", type=int, default=8, help="Depth of the decoder in the watermarking model")
@@ -130,7 +133,7 @@ def main(params):
         msg_decoder = torch.jit.load(params.msg_decoder_path).to(device)
         # already whitened
         
-    else:
+    elif params.decoder_model_type == "hidden":
         msg_decoder = utils_model.get_hidden_decoder(num_bits=params.num_bits, redundancy=params.redundancy, num_blocks=params.decoder_depth, channels=params.decoder_channels).to(device)
         ckpt = utils_model.get_hidden_decoder_ckpt(params.msg_decoder_path)
         print(msg_decoder.load_state_dict(ckpt, strict=False))
@@ -172,9 +175,21 @@ def main(params):
             params.msg_decoder_path = params.msg_decoder_path.replace(".pth", "_whit.pth")
             print(f'>>> Creating torchscript at {params.msg_decoder_path}...')
             torch.jit.save(torchscript_m, params.msg_decoder_path)
+    elif params.decoder_model_type == "stegastamp":
+        msg_decoder = stegastamp_models.StegaStampDecoder(
+        params.img_size,
+        3,
+        params.num_bits,
+        )
+        msg_decoder_load = torch.load(params.msg_decoder_path)
+        if type(msg_decoder_load) is collections.OrderedDict:
+            msg_decoder.load_state_dict(msg_decoder_load)
+        else:
+            msg_decoder = msg_decoder_load
+        msg_decoder.to(device)
     
     msg_decoder.eval()
-    nbit = msg_decoder(torch.zeros(1, 3, 128, 128).to(device)).shape[-1]
+    nbit = msg_decoder(torch.zeros(1, 3, params.img_size, params.img_size).to(device)).shape[-1]
 
     # Freeze LDM and hidden decoder
     for param in [*msg_decoder.parameters(), *ldm_ae.parameters()]:
@@ -385,13 +400,14 @@ def val(data_loader: Iterable, ldm_ae: AutoencoderKL, ldm_decoder: AutoencoderKL
             'jpeg_50': lambda x: utils_img.jpeg_compress(x, 50),
         }
         for name, attack in attacks.items():
-            imgs_aug = attack(vqgan_to_imnet(imgs_w))
-            decoded = msg_decoder(imgs_aug) # b c h w -> b k
-            diff = (~torch.logical_xor(decoded>0, keys>0)) # b k -> b k
-            bit_accs = torch.sum(diff, dim=-1) / diff.shape[-1] # b k -> b
-            word_accs = (bit_accs == 1) # b
-            log_stats[f'bit_acc_{name}'] = torch.mean(bit_accs).item()
-            log_stats[f'word_acc_{name}'] = torch.mean(word_accs.type(torch.float)).item()
+            if params.decoder_model_type == "hidden" or name not in ['crop_01', 'crop_05', 'resize_03', 'resize_07']:
+                imgs_aug = attack(vqgan_to_imnet(imgs_w))
+                decoded = msg_decoder(imgs_aug) # b c h w -> b k
+                diff = (~torch.logical_xor(decoded>0, keys>0)) # b k -> b k
+                bit_accs = torch.sum(diff, dim=-1) / diff.shape[-1] # b k -> b
+                word_accs = (bit_accs == 1) # b
+                log_stats[f'bit_acc_{name}'] = torch.mean(bit_accs).item()
+                log_stats[f'word_acc_{name}'] = torch.mean(word_accs.type(torch.float)).item()
         for name, loss in log_stats.items():
             metric_logger.update(**{name:loss})
 
