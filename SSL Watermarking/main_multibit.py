@@ -86,7 +86,8 @@ def get_parser():
         type=int,
         help="The number of primal learning steps per dual learning step"
     )
-
+    
+    return parser
 
 
 def main(params):
