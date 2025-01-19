@@ -4,6 +4,7 @@ WatermarkDM/edm/training-runs/**
 WatermarkDM/edm/downloads/**
 WatermarkDM/string2img/_output/**
 WatermarkDM/string2img/loss/losses
+WatermarkDM/string2img/*.pth
 .vscode
 .DS_Store
 **/__pycache__/

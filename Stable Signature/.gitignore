@@ -5,3 +5,4 @@ stable_signature/data
 sd_checkpoint.ckpt
 stable_signature/src/loss/losses
 stable_signature/src/output
+stable_signature/models/decoder.pth
