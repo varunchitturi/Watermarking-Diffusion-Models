@@ -17,6 +17,10 @@ import wandb
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+
+
 def build_optimizer(name, model_params, **optim_params):
     """ Build optimizer from a dictionary of parameters """
     if hasattr(torch.optim, name):

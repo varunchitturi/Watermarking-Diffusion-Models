@@ -20,6 +20,9 @@ import wandb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+
 def get_parser():
     parser = argparse.ArgumentParser()
 
@@ -114,7 +117,7 @@ def main(params):
         print('>>> Building backbone and normalization layer...')
     backbone = utils.build_backbone(path=params.model_path, name=params.model_name)
     normlayer = utils.load_normalization_layer(path=params.normlayer_path)
-    model = utils.NormLayerWrapper(backbone, normlayer)
+    model = utils.NormLayerWrapper(backbone, normlayer).to(device)
     for p in model.parameters():
         p.requires_grad = False
     model.eval()
@@ -171,7 +174,7 @@ def main(params):
                 if params.verbose > 0:
                     print('Loading %s messages from %s...'%(params.msg_type, params.msg_path))
                 msgs = utils.load_messages(params.msg_path, params.msg_type, len(dataloader.dataset))
-
+        msgs = msgs.to(device)
         # Construct data augmentation
         if params.data_augmentation == 'all':
             data_aug = data_augmentation.All()
