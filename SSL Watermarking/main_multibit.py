@@ -10,13 +10,15 @@ import os
 import numpy as np
 import torch
 from torchvision.transforms import ToPILImage
+import wandb
 
 import data_augmentation
 import encode
 import evaluate
 import utils
 import utils_img
-import wandb
+
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -60,6 +62,14 @@ def get_parser():
     aa("--batch_size", type=int, default=1, help="Batch size for marking. (Default: 128)")
     aa("--lambda_w", type=float, default=5e4, help="Weight of the watermark loss. (Default: 1.0)")
     aa("--lambda_i", type=float, default=1.0, help="Weight of the image loss. (Default: 1.0)")
+    
+    aa(
+    "--image_loss",
+    type=str,
+    required=True,
+    choices=["l2", "watson-vgg"],
+    help="The type of loss to use for images."
+    )
     
     aa(
     "--loss_formation",

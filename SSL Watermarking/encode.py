@@ -5,14 +5,15 @@
 # LICENSE file in the root directory of this source tree.
 
 import json
+from tqdm import tqdm
 
 import numpy as np
 import torch
-from tqdm import tqdm
+import wandb
 
+from loss.loss_provider import LossProvider
 import utils
 import utils_img
-import wandb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -141,7 +142,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
         carrier (tensor of size KxD): K carriers of dimension D, each one determines a bit
         model: Neural net model to extract the features
         transform: Differentiable augmentation with fixed output size -> 1xCxWxH
-        params: Must contain batch_size, optimizer, scheduler, epochs, lambda_w, lambda_i, verbose
+        params: Must contain batch_size, optimizer, scheduler, epochs, lambda_w, lambda_i, verbose, image_loss
 
     Returns:
         imgs: Watermarked images as a list of unnormalized (distributed around [-1, 1]) pytorch tensors
@@ -151,6 +152,18 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
         dot_products = ft @ carrier.T # BxD @ DxK -> BxK
         msg_signs = 2*msgs.type(torch.float)-1 # BxK
         return torch.sum(torch.clamp(m-dot_products*msg_signs, min=0)) / msg_signs.size(-1)
+    
+    def image_loss(encoded_img, img):
+        if params.image_loss == "l2":
+            return torch.norm(encoded_img - img)**2
+        elif params.image_loss == "watson-vgg":
+            provider = LossProvider()
+            loss_func = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
+            loss_func = loss_func.to(device)
+            return loss_func((1+img)/2.0, (1+encoded_img)/2.0)
+        else:
+            raise ValueError(f'Unknown image loss "{params.image_loss}"')
+            
 
     ssim = utils_img.SSIMAttenuation(device=device)
     pt_imgs_out = []
@@ -199,7 +212,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                 loss_w = message_loss(ft, carrier, batch_msgs)
                 loss_i = 0
                 for ii in range(len(batch_imgs)):
-                    loss_i += torch.norm(batch_imgs[ii] - batch_imgs_orig[ii])**2 # CxWxH -> 1
+                    loss_i += image_loss(batch_imgs[ii], batch_imgs_orig[ii]) # CxWxH -> 1
                     
                 loss = params.lambda_w*loss_w + params.lambda_i*loss_i
                 # update images (gradient descent)
@@ -227,7 +240,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                     loss_w = message_loss(ft, carrier, batch_msgs)
                     loss_i = 0
                     for ii in range(len(batch_imgs)):
-                        loss_i += torch.norm(batch_imgs[ii] - batch_imgs_orig[ii])**2 # CxWxH -> 1
+                        loss_i += image_loss(batch_imgs[ii], batch_imgs_orig[ii]) # CxWxH -> 1
                     
                     loss = params.lambda_w*loss_w + image_loss_weight*loss_i
                 

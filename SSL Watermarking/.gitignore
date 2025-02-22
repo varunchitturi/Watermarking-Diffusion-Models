@@ -1,3 +1,5 @@
 input/
 models/
 normlayers/
+loss/losses/*.pth
+**/__pycache__/**
