@@ -5,9 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 
 import json
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import wandb
 
@@ -16,7 +17,6 @@ import utils
 import utils_img
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -94,6 +94,7 @@ def watermark_0bit(img_loader, carrier, angle, model, transform, params):
             loss_i = 0
             for ii in range(len(batch_imgs)):
                 loss_i += torch.norm(batch_imgs[ii] - batch_imgs_orig[ii])**2 # CxWxH -> 1
+            loss_i /= len(batch_imgs)
             loss = params.lambda_w*loss_w + params.lambda_i*loss_i
             # update images (gradient descent)
             optimizer.zero_grad()
@@ -155,7 +156,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
     
     def image_loss(encoded_img, img):
         if params.image_loss == "l2":
-            return torch.norm(encoded_img - img)**2
+            return (torch.norm(encoded_img - img)**2) / (img.size(-1) * img.size(-2) * img.size(-3)) * 1000
         elif params.image_loss == "watson-vgg":
             provider = LossProvider()
             loss_func = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
@@ -169,8 +170,14 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
     pt_imgs_out = []
     
     image_loss_weight = params.lambda_i
+    
 
     for batch_iter, (images, _) in enumerate(tqdm(img_loader)):
+    
+        loss_evolution = []
+        lossw_evolution = []
+        lossi_evolution = []
+        lossi_weight_evolution = []
 
         # Warning for resolution
         max_res = max([img.shape[-1]*img.shape[-2] for img in images])
@@ -190,7 +197,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
             scheduler = build_lr_scheduler(optimizer=optimizer, **utils.parse_params(params.scheduler))
 
         # optimization
-        for iteration in range(params.epochs):
+        for iteration in trange(params.epochs):
             
             # compute losses
             if params.loss_formation == "regular":
@@ -213,8 +220,8 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                 loss_i = 0
                 for ii in range(len(batch_imgs)):
                     loss_i += image_loss(batch_imgs[ii], batch_imgs_orig[ii]) # CxWxH -> 1
-                    
-                loss = params.lambda_w*loss_w + params.lambda_i*loss_i
+                loss_i /= len(batch_imgs)
+                loss = params.lambda_w*loss_w + image_loss_weight*loss_i
                 # update images (gradient descent)
                 optimizer.zero_grad()
                 loss.backward()
@@ -241,7 +248,7 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                     loss_i = 0
                     for ii in range(len(batch_imgs)):
                         loss_i += image_loss(batch_imgs[ii], batch_imgs_orig[ii]) # CxWxH -> 1
-                    
+                    loss_i /= len(batch_imgs)
                     loss = params.lambda_w*loss_w + image_loss_weight*loss_i
                 
                     # update images (gradient descent)
@@ -253,17 +260,17 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                 
                 image_loss_weight = max(0, image_loss_weight + 
                                         params.dual_lr * (loss_i.detach().item() - params.image_loss_constraint))
-                
-                
             # logs
             logs = {
                     "keyword": "img_optim",
                     "batch": batch_iter,
-                    "iteration": iteration,
-                    "loss": loss.item(),
-                    "loss_w": loss_w.item(),
-                    "loss_i": loss_i.item(),
+                    "iteration": iteration
                 }
+            loss_evolution.append(loss.item())
+            lossw_evolution.append(loss_w.item())
+            lossi_evolution.append(loss_i.item())
+            lossi_weight_evolution.append(image_loss_weight)
+            
             if params.verbose>1:
                 if params.verbose>2:
                     dot_product = (ft @ carrier.T) # BxD @ DxK -> BxK
@@ -274,21 +281,26 @@ def watermark_multibit(img_loader, msgs, carrier, model, transform, params):
                     logs["R_min_max"] = (torch.min(bit_accs).item(), torch.max(bit_accs).item())
                 print("__log__:%s" % json.dumps(logs))
                 
-                
-            
+
+        log_table = wandb.Table(["loss", "w_loss", "image_loss", "image_loss_weight"], list(zip(loss_evolution, 
+                                                                                           lossw_evolution, 
+                                                                                           lossi_evolution, 
+                                                                                           lossi_weight_evolution)))
 
         # post process and store
+        wandb_logs = {}
         for ii,x in enumerate(batch_imgs):
             x = ssim.apply(x, batch_imgs_orig[ii])
             x = utils_img.psnr_clip(x, batch_imgs_orig[ii], params.target_psnr)
             x = utils_img.round_pixel(x)
             # x = utils_img.project_linf(x, batch_imgs_orig[ii], params.linf_radius)
             pt_imgs_out.append(x.squeeze(0).detach().cpu())
-            
-            wandb_stats = logs.copy()
-            wandb_stats["original_images"] = wandb.Image(batch_imgs_orig[ii], caption=f"Original Image")
-            wandb_stats["encoded_images"] = wandb.Image(utils_img.unnormalize_img(x).squeeze(0).detach().cpu(), caption=f"Encoded Image")
-            wandb.log(wandb_stats)
+            if ii == 0:
+                wandb_logs["original_image_sample"] = wandb.Image(batch_imgs_orig[ii], caption=f"Original Image")
+                wandb_logs["encoded_image_sample"] = wandb.Image(x.squeeze(0).detach().cpu(), caption=f"Encoded Image")
+                
+        wandb_logs["batch_log_table"] = log_table
+        wandb.log(wandb_logs)
 
     return pt_imgs_out # [CxW1xH1, ..., CxWnxHn] 
 

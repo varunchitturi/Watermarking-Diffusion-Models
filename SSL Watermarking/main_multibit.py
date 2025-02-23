@@ -10,6 +10,7 @@ import os
 import numpy as np
 import torch
 from torchvision.transforms import ToPILImage
+from torchvision import transforms
 import wandb
 
 import data_augmentation
@@ -60,7 +61,7 @@ def get_parser():
     aa("--optimizer", type=str, default="Adam,lr=0.01", help="Optimizer to use. (Default: Adam,lr=0.01)")
     aa("--scheduler", type=str, default=None, help="Scheduler to use. (Default: None)")
     aa("--batch_size", type=int, default=1, help="Batch size for marking. (Default: 128)")
-    aa("--lambda_w", type=float, default=5e4, help="Weight of the watermark loss. (Default: 1.0)")
+    aa("--lambda_w", type=float, default=2, help="Weight of the watermark loss. (Default: 2)")
     aa("--lambda_i", type=float, default=1.0, help="Weight of the image loss. (Default: 1.0)")
     
     aa(
@@ -165,7 +166,13 @@ def main(params):
         # Load images
         if params.verbose > 0:
             print('>>> Loading images from %s...'%params.data_dir)
-        dataloader = utils_img.get_dataloader(params.data_dir, batch_size=params.batch_size)
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(256),
+            transforms.ToTensor(),
+            utils_img.normalize_img
+        ])
+        dataloader = utils_img.get_dataloader(params.data_dir, batch_size=params.batch_size, transform=transform)
 
         # Generate messages
         if params.verbose > 0:

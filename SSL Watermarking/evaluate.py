@@ -192,7 +192,7 @@ def evaluate_multibit_on_attacks(imgs, carrier, model, msgs_orig, params, attack
             param_names = ['param%i'%kk for kk in range(len(attack.keys()))]
             attack_params = dict(zip(param_names,list(attack.values()))) 
             decoded_datum = decoded_data[jj]
-            diff = (~torch.logical_xor(msgs_orig[ii], decoded_datum['msg'])).tolist() # useful for bit accuracy metric
+            diff = (~torch.logical_xor(msgs_orig[ii].cpu(), decoded_datum['msg'])).tolist() # useful for bit accuracy metric
             log = {
                 "keyword": "evaluation",
                 "img": ii,
@@ -219,8 +219,8 @@ def aggregate_df(df, params):
     Reads the dataframe output by the previous function and returns average detection scores for each transformation
     """
     df['param0'] = df['param0'].fillna(-1)
-    df_mean = df.groupby(['attack','param0'], as_index=False).mean().drop(columns='img')
-    df_agg = df.groupby(['attack','param0'], as_index=False).agg(['mean','min','max','std']).drop(columns='img')
+    df_mean = df.drop(columns=['msg_orig', 'msg_decoded']).groupby(['attack','param0'], as_index=False).mean().drop(columns='img')
+    df_agg = df.drop(columns=['msg_orig', 'msg_decoded']).groupby(['attack','param0'], as_index=False).agg(['mean','min','max','std']).drop(columns='img')
 
     if params.verbose>0:
         print('\n%s'%df_mean)

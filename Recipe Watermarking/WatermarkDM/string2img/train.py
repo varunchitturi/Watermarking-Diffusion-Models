@@ -287,7 +287,7 @@ def main():
         provider = LossProvider()
         loss_percep = provider.get_loss_function('Watson-VGG', colorspace='RGB', pretrained=True, reduction='sum')
         loss_percep = loss_percep.to(device)
-        image_criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+imgs)/2.0, (1+fingerprinted_imgs)/2.0)/ imgs.shape[0]
+        image_criterion = lambda imgs, fingerprinted_imgs: loss_percep((1+fingerprinted_imgs)/2.0, (1+imgs)/2.0)/ imgs.shape[0]
     signature_criterion = nn.BCEWithLogitsLoss()
     
     image_loss = torch.tensor(0)

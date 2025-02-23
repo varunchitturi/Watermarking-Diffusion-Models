@@ -31,11 +31,11 @@ default_transform = transforms.Compose([
 
 def normalize_img(x):
     """ Normalize image to approx. [-1,1] """
-    return (x.to(device) - image_mean) / image_std
+    return (x - image_mean.to(x.device)) / image_std.to(x.device)
 
 def unnormalize_img(x):
     """ Unnormalize image to [0,1] """
-    return (x.to(device) * image_std) + image_mean
+    return (x * image_std.to(x.device)) + image_mean.to(x.device)
 
 def round_pixel(x):
     """ 

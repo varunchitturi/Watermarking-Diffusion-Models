@@ -3,3 +3,4 @@ models/
 normlayers/
 loss/losses/*.pth
 **/__pycache__/**
+output/
