@@ -58,7 +58,7 @@ def get_parser():
     group = parser.add_argument_group('Optimization parameters')
     aa("--epochs", type=int, default=100, help="Number of epochs for image optimization. (Default: 100)")
     aa("--data_augmentation", type=str, default="all", choices=["none", "all"], help="Type of data augmentation to use at marking time. (Default: All)")
-    aa("--optimizer", type=str, default="Adam,lr=0.01", help="Optimizer to use. (Default: Adam,lr=0.01)")
+    aa("--optimizer", type=str, default="Adam,lr=0.004", help="Optimizer to use. (Default: Adam,lr=0.004)")
     aa("--scheduler", type=str, default=None, help="Scheduler to use. (Default: None)")
     aa("--batch_size", type=int, default=1, help="Batch size for marking. (Default: 128)")
     aa("--lambda_w", type=float, default=2, help="Weight of the watermark loss. (Default: 2)")
@@ -106,8 +106,8 @@ def get_parser():
 
 def main(params):
     # Set seeds for reproductibility
-    torch.manual_seed(0)
-    np.random.seed(0)
+    torch.manual_seed(42)
+    np.random.seed(42)
     wandb.init(
         project="Constrained SSL Watermarking",
         config=params
@@ -214,7 +214,9 @@ def main(params):
             if not os.path.exists(imgs_dir):
                 os.mkdir(imgs_dir)
             df = evaluate.evaluate_multibit_on_attacks(imgs_out, carrier, model, msgs, params)
+            wandb.log({"Attack Table": wandb.Table(dataframe=df)})
             df_agg = evaluate.aggregate_df(df, params)
+            wandb.log({"Attack Table Aggregate": wandb.Table(dataframe=df_agg)})
             df_path = os.path.join(params.output_dir,'df.csv')
             df_agg_path = os.path.join(params.output_dir,'df_agg.csv')
             df.to_csv(df_path, index=False)
