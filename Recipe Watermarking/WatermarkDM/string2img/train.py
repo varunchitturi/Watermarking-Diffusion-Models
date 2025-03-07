@@ -233,7 +233,7 @@ def main():
         config=args
     )
 
-    device = torch.device("cuda")
+    device = torch.device(f"cuda:{args.cuda}")
 
     load_data()
     encoder = models.StegaStampEncoder(
