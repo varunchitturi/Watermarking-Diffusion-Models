@@ -16,6 +16,8 @@ def get_parser():
                       help='Image loss type')
     parser.add_argument('--batch_size', type=int, default=4,
                       help='Batch size')
+    parser.add_argument('--data_augmentation', type=str, default='none',
+                      help='Data augmentation type')
     return parser
 
 if __name__ == '__main__':

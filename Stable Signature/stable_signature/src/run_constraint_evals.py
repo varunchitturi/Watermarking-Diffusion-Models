@@ -5,7 +5,7 @@ from finetune_ldm_decoder import main
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_dir', type=str, default='./../data/COCO_finetune_train_3k/',
+    parser.add_argument('--train_dir', type=str, default='./../data/COCO_finetune_train_2k/',
                       help='Path to training data directory')
     parser.add_argument('--val_dir', type=str, default='./../data/COCO_finetune_val_1k/',
                       help='Path to validation data directory')
@@ -22,7 +22,9 @@ def get_parser():
                       help='One or more image loss constraint thresholds')
     parser.add_argument('--dual_lr', type=float, default=0.02,
                       help='Dual learning rate')
-    parser.add_argument('--steps', type=int, default=1000,
+    parser.add_argument('--primal_per_dual', type=int, default=10,
+                      help='Primal steps per dual steps')
+    parser.add_argument('--steps', type=int, default=700,
                       help='Number of training steps')
     parser.add_argument('--cuda', type=int, default=0,
                       help='CUDA device ID')
@@ -31,6 +33,29 @@ def get_parser():
 if __name__ == '__main__':
     parser = get_parser()
     args = parser.parse_args()
+    
+    
+    args.decoder_model_type = "hidden"
+    args.num_bits = 48
+    args.redundancy = 1
+    args.decoder_depth = 8
+    args.decoder_channels = 64
+    args.batch_size = 2
+    args.img_size = 256
+    args.loss_i = "watson-vgg"
+    args.loss_w = "bce"
+    args.lambda_w = 1.0
+    args.optimizer = "AdamW,lr=1e-5"
+    args.warmup_steps = 20
+    args.log_freq = 10
+    args.save_img_freq = 1000
+    args.num_keys = 1
+    args.output_dir = "output/"
+    args.seed = 0
+    args.debug = False
+    
+    
+    
     
     # Run main function for each constraint value
     for constraint in args.image_loss_constraint:

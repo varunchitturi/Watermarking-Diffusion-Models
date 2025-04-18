@@ -91,9 +91,10 @@ def get_parser():
 
 def main(params):
     
-    wandb.init(
+    run = wandb.init(
         project="Constrained Stable Signature",
-        config=params
+        config=params,
+        reinit=True
     )
 
     # Set seeds for reproductibility 
@@ -277,6 +278,8 @@ def main(params):
         with (Path(params.output_dir) / "keys.txt").open("a") as f:
             f.write(os.path.join(params.output_dir, f"checkpoint_{ii_key:03d}.pth") + "\t" + key_str + "\n")
         print('\n')
+    
+    run.finish()
 
 def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Callable, loss_i: Callable, ldm_ae: AutoencoderKL, ldm_decoder:AutoencoderKL, msg_decoder: nn.Module, vqgan_to_imnet:nn.Module, key: torch.Tensor, params: argparse.Namespace):
     header = 'Train'
