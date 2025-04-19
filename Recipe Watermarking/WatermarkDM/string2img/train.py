@@ -55,6 +55,14 @@ parser.add_argument(
     help="Whether to use constrained learning or a single objective with a regularization term. "
 )
 
+parser.add_argument(
+    "--transform",
+    type=str,
+    default="none",
+    choices=["none", "random"],
+    help="Type of transform to apply to the images during training. 'none' means no transformation, 'random' applies random augmentations like rotation, crop, resize, blur, and flips."
+)
+
 # Regular loss formation hyper parameters
 
 parser.add_argument(
@@ -119,6 +127,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.utils import make_grid
 from torchvision.datasets import ImageFolder
+from torchvision.transforms import functional
 from torchvision.utils import save_image
 from tensorboardX import SummaryWriter
 
@@ -218,6 +227,59 @@ def load_data():
     print(f"Loading image folder {args.data_dir} ...")
     dataset = CustomImageFolder(args.data_dir, transform=transform)
     print(f"Finished. Loading took {time() - s:.2f}s")
+    
+    
+def random_transform(imgs):
+    def sample_params(self, x):
+        # randomly select one of augmentations
+        ps = np.array([1,1,1,1,1])
+        ps = ps / ps.sum()
+        augm_type = np.random.choice(['none', 'rotation', 'crop', 'resize', 'blur'], p=ps)
+        # flip param
+        f = np.random.rand()>0.5 if self.flip else 0  
+        # sample params
+        if augm_type == 'none':
+            return augm_type, 0, f
+        elif augm_type == 'rotation':
+            d = np.random.vonmises(0, 1)*self.degrees/np.pi
+            return augm_type, d, f
+        elif augm_type in ['crop', 'resize']:
+            width, height = functional.get_image_size(x)
+            area = height * width
+            target_area = np.random.uniform(*self.crop_scale) * area
+            aspect_ratio = np.exp(np.random.uniform(np.log(self.crop_ratio[0]), np.log(self.crop_ratio[1])))
+            tw = int(np.round(np.sqrt(target_area * aspect_ratio)))
+            th = int(np.round(np.sqrt(target_area / aspect_ratio)))
+            if augm_type == 'crop':
+                i = np.random.randint(0, max(min(height - th + 1, height-1), 0)+1)
+                j = np.random.randint(0, max(min(width - tw + 1, width-1), 0)+1)
+                return augm_type, (i ,j, th, tw), f
+            elif augm_type == 'resize':
+                s = np.random.uniform(*self.resize_scale)
+                return augm_type, (s, th, tw), f
+        elif augm_type == 'blur':
+            b = np.random.randint(1, self.blur_size+1)
+            b = b-(1-b%2) # make it odd         
+            return augm_type, b, f
+        
+    def apply(self, x, augmentation):
+        augm_type, param, f = augmentation
+        if augm_type == 'blur':
+            x = functional.gaussian_blur(x, param)
+        if augm_type == 'rotation':
+            x = functional.rotate(x, param, interpolation=self.interpolation)
+            # x = functional.rotate(x, d, expand=True, interpolation=self.interpolation)
+        elif augm_type == 'crop':
+            x = functional.crop(x, *param)
+        elif augm_type == 'resize':
+            s, h, w = param
+            x = functional.resize(x, int((s**0.5)*min(h,w)), interpolation=self.interpolation)
+        x = functional.hflip(x) if f else x
+        return x
+    
+    transform_params = [sample_params(x) for x in imgs]
+    imgs_aug = [apply(x, param) for x, param in zip(imgs, transform_params)]
+    return imgs_aug
 
 
 def main():
@@ -332,6 +394,10 @@ def main():
             for _ in range(1 if steps_since_image_loss_activated == -1 else primal_steps):
             
                 fingerprinted_images = encoder(fingerprints, clean_images)
+                
+                if args.transform == "random":
+                    fingerprinted_images = random_transform(fingerprinted_images)
+                
 
                 decoder_output = decoder(fingerprinted_images)
                 

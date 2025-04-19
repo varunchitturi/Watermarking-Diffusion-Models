@@ -41,17 +41,14 @@ attacks_dict = {
 }
 
 attacks = [{'attack': 'none'}] \
-    + [{'attack': 'meme_format'}] \
-    + [{'attack': 'overlay_onto_screenshot'}] \
-    + [{'attack': 'rotation', 'angle': jj} for jj in range(0,45,5)] \
-    + [{'attack': 'center_crop', 'scale': 0.1*jj} for jj in range(1,11)] \
-    + [{'attack': 'resize', 'scale': 0.1*jj} for jj in range(1,11)] \
-    + [{'attack': 'blur', 'kernel_size': 1+2*jj} for jj in range(1,10)] \
-    + [{'attack': 'jpeg', 'quality': 10*jj} for jj in range(1,11)] \
-    + [{'attack': 'contrast', 'contrast_factor': 0.5*jj} for jj in range(0,5)] \
-    + [{'attack': 'brightness', 'brightness_factor': 0.5*jj} for jj in range(1,5)] \
-    + [{'attack': 'hue', 'hue_factor': -0.5 + 0.25*jj} for jj in range(0,5)] \
-    + [{'attack': 'hue', 'hue_factor': 0.2}] 
+    + [{'attack': 'rotation', 'angle': jj} for jj in range(0,95,5)] \
+    + [{'attack': 'center_crop', 'scale': x} for x in [0.1, 0.5]] \
+    + [{'attack': 'resize', 'scale': x} for x in [0.3, 0.7]] \
+    + [{'attack': 'blur', 'kernel_size': 1+2*jj} for jj in range(0,4)] \
+    + [{'attack': 'jpeg', 'quality': x} for x in [10, 50, 80]] \
+    + [{'attack': 'contrast', 'contrast_factor': x} for x in [0.5, 1.5, 2.0]] \
+    + [{'attack': 'brightness', 'brightness_factor': x} for x in [0.5, 1.5, 2.0]] \
+    + [{'attack': 'hue', 'hue_factor': x} for x in [-0.5, -0.25, 0.0, 0.25, 0.5, 1.0]] 
     
 def generate_attacks(img, attacks):
     """ Generate a list of attacked images from a PIL image. """

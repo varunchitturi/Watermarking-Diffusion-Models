@@ -19,6 +19,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torchvision.transforms import functional
+from augly.image import functional as aug_functional
 from torchvision.utils import save_image
 import collections
 import stegastamp_models
@@ -76,6 +78,8 @@ def get_parser():
     aa("--dual_lr", type=float, help="The dual learning rate when using constrained learning.")
     aa("--primal_per_dual", type=int, default=5, help="The number of primal learning steps per dual learning step")
 
+    aa("--transform", type=str, default="none", choices=["none", "random"], help="Type of transform to apply to the images")
+    
     group = parser.add_argument_group('Logging and saving freq. parameters')
     aa("--log_freq", type=int, default=10, help="Logging frequency (in steps)")
     aa("--save_img_freq", type=int, default=1000, help="Frequency of saving generated images (in steps)")
@@ -280,6 +284,63 @@ def main(params):
         print('\n')
     
     run.finish()
+    
+def random_transform(imgs):
+    def sample_params(self, x):
+        # randomly select one of augmentations
+        ps = np.array([1,1,1,1,1])
+        ps = ps / ps.sum()
+        augm_type = np.random.choice(['none', 'rotation', 'crop', 'resize', 'blur'], p=ps)
+        # flip param
+        f = np.random.rand()>0.5 if self.flip else 0  
+        # sample params
+        if augm_type == 'none':
+            return augm_type, 0, f
+        elif augm_type == 'rotation':
+            d = np.random.vonmises(0, 1)*self.degrees/np.pi
+            return augm_type, d, f
+        elif augm_type in ['crop', 'resize']:
+            width, height = functional.get_image_size(x)
+            area = height * width
+            target_area = np.random.uniform(*self.crop_scale) * area
+            aspect_ratio = np.exp(np.random.uniform(np.log(self.crop_ratio[0]), np.log(self.crop_ratio[1])))
+            tw = int(np.round(np.sqrt(target_area * aspect_ratio)))
+            th = int(np.round(np.sqrt(target_area / aspect_ratio)))
+            if augm_type == 'crop':
+                i = np.random.randint(0, max(min(height - th + 1, height-1), 0)+1)
+                j = np.random.randint(0, max(min(width - tw + 1, width-1), 0)+1)
+                return augm_type, (i ,j, th, tw), f
+            elif augm_type == 'resize':
+                s = np.random.uniform(*self.resize_scale)
+                return augm_type, (s, th, tw), f
+        elif augm_type == 'blur':
+            b = np.random.randint(1, self.blur_size+1)
+            b = b-(1-b%2) # make it odd         
+            return augm_type, b, f
+        
+    def apply(self, x, augmentation):
+        augm_type, param, f = augmentation
+        if augm_type == 'blur':
+            x = functional.gaussian_blur(x, param)
+        if augm_type == 'rotation':
+            x = functional.rotate(x, param, interpolation=self.interpolation)
+            # x = functional.rotate(x, d, expand=True, interpolation=self.interpolation)
+        elif augm_type == 'crop':
+            x = functional.crop(x, *param)
+        elif augm_type == 'resize':
+            s, h, w = param
+            x = functional.resize(x, int((s**0.5)*min(h,w)), interpolation=self.interpolation)
+        x = functional.hflip(x) if f else x
+        return x
+    
+    transform_params = [sample_params(x) for x in imgs]
+    imgs_aug = [apply(x, param) for x, param in zip(imgs, transform_params)]
+    return imgs_aug
+        
+
+    
+
+    
 
 def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Callable, loss_i: Callable, ldm_ae: AutoencoderKL, ldm_decoder:AutoencoderKL, msg_decoder: nn.Module, vqgan_to_imnet:nn.Module, key: torch.Tensor, params: argparse.Namespace):
     header = 'Train'
@@ -311,9 +372,13 @@ def train(data_loader: Iterable, optimizer: torch.optim.Optimizer, loss_w: Calla
             imgs_d0 = ldm_ae.decode(imgs_z) # b z h/f w/f -> b c h w
             
             imgs_w = ldm_decoder.decode(imgs_z) # b z h/f w/f -> b c h w
+            
 
             # extract watermark
-            decoded = msg_decoder(vqgan_to_imnet(imgs_w)) # b c h w -> b k
+            if params.transform == "random":
+                decoded = msg_decoder(random_transform(vqgan_to_imnet(imgs_w))) # b c h w -> b k
+            elif params.transform == "none":
+                decoded = msg_decoder(vqgan_to_imnet(imgs_w)) # b c h w -> b k
             
         
             # compute loss
@@ -393,14 +458,33 @@ def val(data_loader: Iterable, ldm_ae: AutoencoderKL, ldm_decoder: AutoencoderKL
             'none': lambda x: x,
             'crop_01': lambda x: utils_img.center_crop(x, 0.1),
             'crop_05': lambda x: utils_img.center_crop(x, 0.5),
-            'rot_25': lambda x: utils_img.rotate(x, 25),
+            'rot_15': lambda x: utils_img.rotate(x, 15),
+            'rot_30': lambda x: utils_img.rotate(x, 30),
+            'rot_45': lambda x: utils_img.rotate(x, 45),
+            'rot_60': lambda x: utils_img.rotate(x, 60),
+            'rot_75': lambda x: utils_img.rotate(x, 75),
             'rot_90': lambda x: utils_img.rotate(x, 90),
             'resize_03': lambda x: utils_img.resize(x, 0.3),
             'resize_07': lambda x: utils_img.resize(x, 0.7),
+            'blur_1': lambda x: functional.gaussian_blur(x, 1),
+            'blur_3': lambda x: functional.gaussian_blur(x, 3),
+            'blur_5': lambda x: functional.gaussian_blur(x, 5),
+            'blur_7': lambda x: functional.gaussian_blur(x, 7),
+            'brightness_p5': lambda x: utils_img.adjust_brightness(x, 0.5),
             'brightness_1p5': lambda x: utils_img.adjust_brightness(x, 1.5),
             'brightness_2': lambda x: utils_img.adjust_brightness(x, 2),
-            'jpeg_80': lambda x: utils_img.jpeg_compress(x, 80),
+            'contrast_05': lambda x: utils_img.adjust_contrast(x, 0.5),
+            'contrast_15': lambda x: utils_img.adjust_contrast(x, 1.5),
+            'contrast_2': lambda x: utils_img.adjust_contrast(x, 2),
+            'jpeg_10': lambda x: utils_img.jpeg_compress(x, 10),
             'jpeg_50': lambda x: utils_img.jpeg_compress(x, 50),
+            'jpeg_80': lambda x: utils_img.jpeg_compress(x, 80),
+            'hue_p05': lambda x: utils_img.adjust_hue(x, -0.5),
+            'hue_p025': lambda x: utils_img.adjust_hue(x, -0.25),
+            'hue_0': lambda x: utils_img.adjust_hue(x, 0),
+            'hue_025': lambda x: utils_img.adjust_hue(x, 0.25),
+            'hue_05': lambda x: utils_img.adjust_hue(x, 0.5),
+            'hue_1': lambda x: utils_img.adjust_hue(x, 1)
         }
         for name, attack in attacks.items():
             if params.decoder_model_type == "hidden" or name not in ['crop_01', 'crop_05', 'resize_03', 'resize_07']:

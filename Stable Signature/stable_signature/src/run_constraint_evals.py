@@ -26,6 +26,8 @@ def get_parser():
                       help='Primal steps per dual steps')
     parser.add_argument('--steps', type=int, default=700,
                       help='Number of training steps')
+    parser.add_argument('--transform', type=str, default="none", choices=["none", "random"],
+                      help='Type of transform to apply to the images during training')
     parser.add_argument('--cuda', type=int, default=0,
                       help='CUDA device ID')
     return parser
